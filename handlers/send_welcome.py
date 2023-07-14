@@ -17,6 +17,11 @@ def welcome_player(message, game):
                     user_name=message.from_user.first_name,
                 ), parse_mode='HTML',)
         
+        new_game = Game(chat_id=message.chat.id, 
+                        game_message_id=msg.id, 
+                        join_date=datetime.date.today())
+        new_game.save()
+        
         bot.register_next_step_handler(msg, set_second_player, message.from_user.id)
     else:
         bot.send_message(message.chat.id, template.render(
@@ -25,7 +30,8 @@ def welcome_player(message, game):
                 ), parse_mode='HTML',)
 
 
-def set_second_player(message, user_id):
+@in_game_middleware
+def set_second_player(message, game, user_id):
     has_mention = False
     username = None
     user = None
@@ -47,6 +53,9 @@ def set_second_player(message, user_id):
     
     template = template_env.get_template('set_mention_player_ru.html')
     
+    if game is None:
+        return
+
     if has_mention:
         markup = types.InlineKeyboardMarkup()
 
@@ -56,14 +65,14 @@ def set_second_player(message, user_id):
             types.InlineKeyboardButton("Я готов", 
                                        callback_data=f'imready_{user_id}_{message.from_user.first_name}_{user_}')
         )
-
-        bot.send_message(chat_id=message.chat.id,
+        
+        bot.edit_message_text(chat_id=message.chat.id, message_id=game.game_message_id,
             text=template.render(
                 sucsess=True,
                 user_name=message.from_user.first_name,
             ), parse_mode='HTML', reply_markup=markup)
     else:
-        msg = bot.send_message(chat_id=message.chat.id,
+        msg = bot.edit_message_text(chat_id=message.chat.id, message_id=game.game_message_id,
             text=template.render(
                 sucsess=False,
                 user_name=message.from_user.first_name,
@@ -79,6 +88,8 @@ def find_player(event):
 
     if event.from_user.username == username \
         or str(event.from_user.id) == username:
+        bot.answer_callback_query(callback_query_id=event.id, show_alert=False,
+                text="Все ок")
         start_game(event, first_player, first_player_name)
     else:
         bot.answer_callback_query(callback_query_id=event.id, show_alert=False,
@@ -89,14 +100,13 @@ def find_player(event):
 def start_game(event, game, first_player, first_player_name):
     template = template_env.get_template('start_game_ru.html')
 
-    if game is None:
-        new_game = Game(chat_id=event.message.chat.id, 
-                        first_player=first_player,
-                        first_player_name=first_player_name,
-                        second_player=event.from_user.id,
-                        second_player_name=event.from_user.first_name,
-                        join_date=datetime.date.today())
-        new_game.save()
+    if (game is not None) and not game.is_started:
+        game.first_player = first_player 
+        game.first_player_name = first_player_name
+        game.second_player = event.from_user.id
+        game.second_player_name = event.from_user.first_name
+
+        game.save()
 
         markup = types.InlineKeyboardMarkup()
         item1 = types.InlineKeyboardButton("Камень", callback_data='rock')
@@ -107,7 +117,7 @@ def start_game(event, game, first_player, first_player_name):
         markup.add(item1, item2, item3)
         markup.add(item4)
 
-        bot.send_message(chat_id=event.message.chat.id,
+        bot.edit_message_text(chat_id=event.message.chat.id, message_id=game.game_message_id,
             text=template.render(
                 new_game=True,
                 user_name=event.from_user.first_name,

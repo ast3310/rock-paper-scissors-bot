@@ -10,7 +10,7 @@ def first_is_winner(first_player_move, second_player_move):
     if first_player_move == second_player_move:
         return False
     
-    FIRST_COND = [
+    CONDITIONS = [
         first_player_move == Move.ROCK.value and \
         second_player_move == Move.SCISSORS.value,
 
@@ -21,7 +21,7 @@ def first_is_winner(first_player_move, second_player_move):
         second_player_move == Move.ROCK.value,
     ]
 
-    return any(FIRST_COND)
+    return any(CONDITIONS)
 
 
 @bot.callback_query_handler(func=lambda call: call.data in ['rock', 'scissors', 'paper'])
@@ -37,48 +37,75 @@ def player_move(event, game):
                 text="Ваш ход принят")
             
             template = template_env.get_template('move_notify_ru.html')
-            
-            bot.send_message(chat_id=event.message.chat.id,
-                text=template.render(
-                    user_name=event.from_user.first_name,
-                ), parse_mode='HTML')
+
+        is_first_try = False
+
+        if (not game.first_player_move) and (not game.second_player_move):
+            is_first_try = True
 
         if player == Player.FIRST and (not game.first_player_move):
             game.first_player_move = event.data
         elif player == Player.SECOND and (not game.second_player_move):
             game.second_player_move = event.data
+        else:
+            return
+        
+
+        if not game.moves_message_id:
+            msg = bot.send_message(chat_id=event.message.chat.id,
+                text=template.render(
+                    user_name=event.from_user.first_name,
+                ), parse_mode='HTML')
+            
+            game.moves_message_id = msg.id
+            game.save()
+        elif is_first_try:
+            bot.edit_message_text(
+                chat_id=event.message.chat.id, 
+                message_id=game.moves_message_id,
+                parse_mode='HTML',
+                text=template.render(
+                    user_name=event.from_user.first_name,
+                ),
+            )
 
         if game.first_player_move and game.second_player_move:
             template = template_env.get_template('winner_notify_ru.html')
-        
+
+            text = None
+
             if first_is_winner(game.first_player_move, game.second_player_move):
-                bot.send_message(chat_id=event.message.chat.id,
-                    text=template.render(
-                        is_draw=False,
-                        winner_name=game.first_player_name,
-                    ), parse_mode='HTML')
+                text = template.render(
+                    is_draw=False,
+                    winner_name=game.first_player_name,
+                )
                 
                 game.first_player_score += 1
             
             elif first_is_winner(game.second_player_move, game.first_player_move):
-                bot.send_message(chat_id=event.message.chat.id,
-                    text=template.render(
-                        is_draw=False,
-                        winner_name=game.second_player_name,
-                    ), parse_mode='HTML')
+                text = template.render(
+                    is_draw=False,
+                    winner_name=game.second_player_name,
+                )
                 
                 game.second_player_score += 1
             else:
-                bot.send_message(chat_id=event.message.chat.id,
-                    text=template.render(
-                        is_draw=True,
-                    ), parse_mode='HTML')
+                text = template.render(
+                    is_draw=True,
+                )
                 
                 game.first_player_score += 1
                 game.second_player_score += 1
             
             game.first_player_move = None
             game.second_player_move = None
+
+            bot.edit_message_text(
+                chat_id=event.message.chat.id, 
+                message_id=game.moves_message_id,
+                parse_mode='HTML',
+                text=text, 
+            )
         
         game.save()
 
@@ -107,3 +134,11 @@ def end_game(event, game):
             ), parse_mode='HTML')
 
         game.delete(pk=game.pk)
+
+        try:
+            bot.delete_message(
+                chat_id=event.message.chat.id,
+                message_id=game.moves_message_id,
+            )
+        except Exception as e:
+            print(e)
